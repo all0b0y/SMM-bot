@@ -139,10 +139,10 @@ Final Content Pack Agent
 }
 ```
 
-**Рекомендуемая LLM:** `google/gemini-2.5-flash-lite`
+**Рекомендуемая LLM:** `qwen/qwen3.6-flash`
 
 **Почему:**
-Этот агент делает структурирование, извлечение и нормализацию. Для этого не нужна дорогая frontier-модель. Gemini 2.5 Flash-Lite на OpenRouter имеет 1M контекст и стоит $0.10 / 1M input tokens и $0.40 / 1M output tokens, что делает ее хорошей базовой моделью для дешевого парсинга длинных описаний. ([OpenRouter][1])
+Этот агент делает структурирование, извлечение и нормализацию. Для этого не нужна дорогая frontier-модель. Nvidia Nemotron-Lite на OpenRouter имеет 1M контекст и стоит $0.10 / 1M input tokens и $0.40 / 1M output tokens, что делает ее хорошей базовой моделью для дешевого парсинга длинных описаний. ([OpenRouter][1])
 
 ---
 
@@ -171,9 +171,9 @@ Final Content Pack Agent
 
 | Агент                       | Основная модель          | Резерв                    |
 | --------------------------- | ------------------------ | ------------------------- |
-| Audience Segmentation Agent | `deepseek/deepseek-chat` | `google/gemini-2.5-flash` |
+| Audience Segmentation Agent | `deepseek/deepseek-chat` | `nvidia/nemotron-3-nano-omni-30b-a3b-reasoning:free` |
 | Persona Builder Agent       | `deepseek/deepseek-chat` | `qwen/qwen3.6-plus`       |
-| Pain & Trigger Agent        | `qwen/qwen3.6-plus`      | `google/gemini-2.5-flash` |
+| Pain & Trigger Agent        | `qwen/qwen3.6-plus`      | `nvidia/nemotron-3-nano-omni-30b-a3b-reasoning:free` |
 
 **Почему:**
 `deepseek/deepseek-chat` стоит $0.32 / 1M input и $0.89 / 1M output tokens, при этом OpenRouter описывает DeepSeek-V3 как сильную модель для instruction following и coding, конкурирующую с ведущими open-source моделями. Она подходит для массовых аналитических и генеративных шагов без высокой стоимости. ([OpenRouter][2])
@@ -210,13 +210,13 @@ Final Content Pack Agent
 
 | Агент                    | Основная модель           | Резерв                    |
 | ------------------------ | ------------------------- | ------------------------- |
-| Positioning Agent        | `qwen/qwen3.6-plus`       | `google/gemini-2.5-flash` |
-| Competitor Insight Agent | `google/gemini-2.5-flash` | `qwen/qwen3.6-plus`       |
-| Content Strategy Agent   | `qwen/qwen3.6-plus`       | `google/gemini-2.5-flash` |
+| Positioning Agent        | `qwen/qwen3.6-plus`       | `nvidia/nemotron-3-nano-omni-30b-a3b-reasoning:free` |
+| Competitor Insight Agent | `nvidia/nemotron-3-nano-omni-30b-a3b-reasoning:free` | `qwen/qwen3.6-plus`       |
+| Content Strategy Agent   | `qwen/qwen3.6-plus`       | `nvidia/nemotron-3-nano-omni-30b-a3b-reasoning:free` |
 | Rubricator Agent         | `deepseek/deepseek-chat`  | `qwen/qwen3.6-plus`       |
 
 **Почему:**
-Здесь уже не просто извлечение, а стратегическая сборка. Нужны модели уровня “хороший баланс reasoning + цена”. Для этого оптимальны Qwen3.6 Plus и Gemini 2.5 Flash. Gemini 2.5 Flash на OpenRouter имеет 1M контекст и стоит $0.30 / 1M input и $2.50 / 1M output tokens; он подходит для reasoning, coding, математики и научных задач, а также имеет встроенные thinking-возможности. ([OpenRouter][4])
+Здесь уже не просто извлечение, а стратегическая сборка. Нужны модели уровня “хороший баланс reasoning + цена”. Для этого оптимальны Qwen3.6 Plus и Nvidia Nemotron. Nvidia Nemotron на OpenRouter имеет 1M контекст и стоит $0.30 / 1M input и $2.50 / 1M output tokens; он подходит для reasoning, coding, математики и научных задач, а также имеет встроенные thinking-возможности. ([OpenRouter][4])
 
 ---
 
@@ -250,9 +250,9 @@ Final Content Pack Agent
 | ------------------------- | ------------------------ | ------------------------------ |
 | Pain-Based Generator      | `deepseek/deepseek-chat` | `qwen/qwen3.6-plus`            |
 | Trigger-Based Generator   | `deepseek/deepseek-chat` | `qwen/qwen3.6-plus`            |
-| Competitor Gap Generator  | `qwen/qwen3.6-plus`      | `google/gemini-2.5-flash`      |
-| Funnel-Based Generator    | `deepseek/deepseek-chat` | `google/gemini-2.5-flash`      |
-| Platform Format Generator | `deepseek/deepseek-chat` | `google/gemini-2.5-flash-lite` |
+| Competitor Gap Generator  | `qwen/qwen3.6-plus`      | `nvidia/nemotron-3-nano-omni-30b-a3b-reasoning:free`      |
+| Funnel-Based Generator    | `deepseek/deepseek-chat` | `nvidia/nemotron-3-nano-omni-30b-a3b-reasoning:free`      |
+| Platform Format Generator | `deepseek/deepseek-chat` | `qwen/qwen3.6-flash` |
 
 **Почему:**
 Генерация идей требует объема. Здесь нельзя ставить дорогую модель на каждый вызов, потому что генераторов несколько и они будут давать десятки идей. `deepseek/deepseek-chat` — хороший default для массовой генерации по цене / качеству. Для конкурентной отстройки лучше использовать `qwen/qwen3.6-plus`, потому что там больше стратегического reasoning.
@@ -289,14 +289,14 @@ Final Content Pack Agent
 
 | Агент                  | Основная модель                | Резерв                   | Температура |
 | ---------------------- | ------------------------------ | ------------------------ | ----------: |
-| Deduplication Agent    | `google/gemini-2.5-flash-lite` | `deepseek/deepseek-chat` |         0.1 |
-| Idea Critic Agent      | `google/gemini-2.5-flash`      | `qwen/qwen3.6-plus`      |         0.1 |
-| Garbage Filter Agent   | `google/gemini-2.5-flash`      | `qwen/qwen3.6-plus`      |     0.0–0.1 |
+| Deduplication Agent    | `qwen/qwen3.6-flash` | `deepseek/deepseek-chat` |         0.1 |
+| Idea Critic Agent      | `nvidia/nemotron-3-nano-omni-30b-a3b-reasoning:free`      | `qwen/qwen3.6-plus`      |         0.1 |
+| Garbage Filter Agent   | `nvidia/nemotron-3-nano-omni-30b-a3b-reasoning:free`      | `qwen/qwen3.6-plus`      |     0.0–0.1 |
 | Idea Improvement Agent | `deepseek/deepseek-chat`       | `qwen/qwen3.6-plus`      |     0.5–0.7 |
-| Second Critic Agent    | `google/gemini-2.5-flash`      | `qwen/qwen3.6-plus`      |     0.0–0.1 |
+| Second Critic Agent    | `nvidia/nemotron-3-nano-omni-30b-a3b-reasoning:free`      | `qwen/qwen3.6-plus`      |     0.0–0.1 |
 
 **Почему:**
-Критики должны быть строже генераторов. Лучше использовать более надежную reasoning-модель с низкой температурой. На критических этапах можно подключать `google/gemini-2.5-flash`, а не Flash-Lite, потому что качество отбора важнее экономии.
+Критики должны быть строже генераторов. Лучше использовать более надежную reasoning-модель с низкой температурой. На критических этапах можно подключать `nvidia/nemotron-3-nano-omni-30b-a3b-reasoning:free`, а не Flash-Lite, потому что качество отбора важнее экономии.
 
 ---
 
@@ -329,8 +329,8 @@ Final Content Pack Agent
 | Агент                     | Основная модель                | Резерв                    | Температура |
 | ------------------------- | ------------------------------ | ------------------------- | ----------: |
 | Script Writer Agent       | `qwen/qwen3.6-plus`            | `deepseek/deepseek-chat`  |         0.6 |
-| Script Critic Agent       | `google/gemini-2.5-flash`      | `qwen/qwen3.6-plus`       |         0.1 |
-| CTA Critic Agent          | `google/gemini-2.5-flash-lite` | `google/gemini-2.5-flash` |         0.1 |
+| Script Critic Agent       | `nvidia/nemotron-3-nano-omni-30b-a3b-reasoning:free`      | `qwen/qwen3.6-plus`       |         0.1 |
+| CTA Critic Agent          | `qwen/qwen3.6-flash` | `nvidia/nemotron-3-nano-omni-30b-a3b-reasoning:free` |         0.1 |
 | Platform Adaptation Agent | `deepseek/deepseek-chat`       | `qwen/qwen3.6-plus`       |     0.4–0.6 |
 
 **Почему:**
@@ -362,7 +362,7 @@ Final Content Pack Agent
 }
 ```
 
-**Рекомендуемая LLM:** `google/gemini-2.5-flash-lite`
+**Рекомендуемая LLM:** `qwen/qwen3.6-flash`
 **Резерв:** `qwen/qwen3.6-plus`
 
 **Почему:**
@@ -390,7 +390,7 @@ OpenRouter дает доступ к сотням моделей через ед�
 
 ### Tier A — дешевые структурные задачи
 
-**Модель:** `google/gemini-2.5-flash-lite`
+**Модель:** `qwen/qwen3.6-flash`
 
 Использовать для:
 
@@ -402,7 +402,7 @@ OpenRouter дает доступ к сотням моделей через ед�
 * финальной упаковки;
 * коротких служебных проверок.
 
-**Цена:** $0.10 / 1M input, $0.40 / 1M output. ([OpenRouter][1])
+**Почему:** Быстрая и дешевая модель от Qwen для структурных задач. Хорошо следует JSON-инструкциям, поддерживает structured output.
 
 ---
 
@@ -440,7 +440,7 @@ OpenRouter дает доступ к сотням моделей через ед�
 
 ### Tier D — строгая критика и reasoning-контроль
 
-**Модель:** `google/gemini-2.5-flash`
+**Модель:** `nvidia/nemotron-3-nano-omni-30b-a3b-reasoning:free`
 
 Использовать для:
 
@@ -450,28 +450,13 @@ OpenRouter дает доступ к сотням моделей через ед�
 * Script Critic Agent;
 * сложной проверки соответствия стратегии.
 
-**Цена:** $0.30 / 1M input, $2.50 / 1M output. ([OpenRouter][4])
+**Почему:** Nvidia Nemotron — reasoning-модель с бесплатным доступом через OpenRouter. Быстрее большинства frontier-моделей, хорошо справляется с аналитическими и критическими задачами. Используется на всех quality gates.
 
 ---
 
-### Tier E — экспериментальный quality tier
+### Tier E — премиум-резерв, не default
 
-**Модель:** `google/gemini-3-flash-preview`
-
-Использовать осторожно:
-
-* A/B-тест критики;
-* сложные стратегические проекты;
-* длинные документы;
-* агентные циклы с tool use.
-
-Модель на OpenRouter указана как high-speed / high-value thinking model для agentic workflows, multi-turn chat и coding assistance, имеет 1M контекст, structured output, tool use и configurable reasoning. Но так как это `preview`, я бы не ставил ее как единственную production-модель. ([OpenRouter][7])
-
----
-
-### Tier F — премиум-резерв, не default
-
-**Модель:** `anthropic/claude-sonnet-4.6`
+**Модель:** `qwen/qwen3.6-plus`
 
 Использовать только для:
 
@@ -480,37 +465,37 @@ OpenRouter дает доступ к сотням моделей через ед�
 * спорных сценариев;
 * cases, где стоимость менее важна, чем качество.
 
-На OpenRouter Claude Sonnet 4.6 стоит $3 / 1M input и $15 / 1M output, поэтому это не default-модель для массовой генерации. Ее стоит использовать как fallback/escalation, а не как базовый движок системы. ([OpenRouter][8])
+`qwen/qwen3.6-plus` — самая сильная модель в нашем стеке: глубокий reasoning, 1M контекст, хороший русский язык. Стоит использовать как escalation там, где остальные модели не справились.
 
 ---
 
 # 5. Таблица: агент → задача → модель
 
-| Агент                       | Задача                                  | Основная LLM            | Fallback                | Причина выбора                        |
-| --------------------------- | --------------------------------------- | ----------------------- | ----------------------- | ------------------------------------- |
-| Brief Agent                 | Извлечение и структурирование брифа     | `gemini-2.5-flash-lite` | `deepseek-chat`         | Дешево, большой контекст, JSON-задача |
-| Audience Segmentation Agent | Сегменты и подсегменты                  | `deepseek-chat`         | `gemini-2.5-flash`      | Хороший баланс цены и качества        |
-| Persona Builder Agent       | Портреты ЦА                             | `deepseek-chat`         | `qwen3.6-plus`          | Нужна генерация реалистичных персон   |
-| Pain & Trigger Agent        | Боли, желания, триггеры                 | `qwen3.6-plus`          | `gemini-2.5-flash`      | Нужна смысловая глубина               |
-| Positioning Agent           | УТП, позиционирование, границы обещаний | `qwen3.6-plus`          | `gemini-2.5-flash`      | Стратегическая задача                 |
-| Competitor Insight Agent    | Паттерны конкурентов и отстройка        | `gemini-2.5-flash`      | `qwen3.6-plus`          | Нужен reasoning и анализ              |
-| Content Strategy Agent      | Контентные столпы и воронка             | `qwen3.6-plus`          | `gemini-2.5-flash`      | Сложная SMM-сборка                    |
-| Rubricator Agent            | Рубрики и темы                          | `deepseek-chat`         | `qwen3.6-plus`          | Генеративная задача средней сложности |
-| Pain-Based Generator        | Идеи от болей                           | `deepseek-chat`         | `qwen3.6-plus`          | Массовая генерация                    |
-| Trigger-Based Generator     | Идеи от триггеров                       | `deepseek-chat`         | `qwen3.6-plus`          | Массовая генерация                    |
-| Competitor Gap Generator    | Идеи от слабостей конкурентов           | `qwen3.6-plus`          | `gemini-2.5-flash`      | Нужна отстройка                       |
-| Funnel-Based Generator      | Идеи под воронку                        | `deepseek-chat`         | `gemini-2.5-flash`      | Генерация + структура                 |
-| Platform Format Generator   | Идеи под Reels / Shorts / TikTok / VK   | `deepseek-chat`         | `gemini-2.5-flash-lite` | Форматная генерация                   |
-| Deduplication Agent         | Удаление дублей                         | `gemini-2.5-flash-lite` | `deepseek-chat`         | Дешевая логическая проверка           |
-| Idea Critic Agent           | Скоринг идей                            | `gemini-2.5-flash`      | `qwen3.6-plus`          | Строгий reasoning                     |
-| Garbage Filter Agent        | Анти-мусорный фильтр                    | `gemini-2.5-flash`      | `qwen3.6-plus`          | Критический gate                      |
-| Idea Improvement Agent      | Улучшение слабых идей                   | `deepseek-chat`         | `qwen3.6-plus`          | Креативная переработка                |
-| Second Critic Agent         | Повторная проверка                      | `gemini-2.5-flash`      | `qwen3.6-plus`          | Независимый контроль                  |
-| Script Writer Agent         | Сценарии видео                          | `qwen3.6-plus`          | `deepseek-chat`         | Лучше качество текста                 |
-| Script Critic Agent         | Проверка сценариев                      | `gemini-2.5-flash`      | `qwen3.6-plus`          | Строгая оценка                        |
-| CTA Critic Agent            | Проверка CTA                            | `gemini-2.5-flash-lite` | `gemini-2.5-flash`      | Простая, но важная проверка           |
-| Platform Adaptation Agent   | Адаптация под площадку                  | `deepseek-chat`         | `qwen3.6-plus`          | Текстовая адаптация                   |
-| Final Content Pack Agent    | Финальная сборка                        | `gemini-2.5-flash-lite` | `qwen3.6-plus`          | Сборка JSON и итогового пакета        |
+| Агент                       | Задача                                  | Основная LLM         | Fallback             | Причина выбора                        |
+| --------------------------- | --------------------------------------- | -------------------- | -------------------- | ------------------------------------- |
+| Brief Agent                 | Извлечение и структурирование брифа     | `qwen3.6-flash`      | `deepseek-chat`      | Быстро, дёшево, JSON-задача           |
+| Audience Segmentation Agent | Сегменты и подсегменты                  | `deepseek-chat`      | `qwen3.6-plus`       | Хороший баланс цены и качества        |
+| Persona Builder Agent       | Портреты ЦА                             | `deepseek-chat`      | `qwen3.6-plus`       | Нужна генерация реалистичных персон   |
+| Pain & Trigger Agent        | Боли, желания, триггеры                 | `qwen3.6-plus`       | `nemotron:free`      | Нужна смысловая глубина               |
+| Positioning Agent           | УТП, позиционирование, границы обещаний | `qwen3.6-plus`       | `nemotron:free`      | Стратегическая задача                 |
+| Competitor Insight Agent    | Паттерны конкурентов и отстройка        | `nemotron:free`      | `qwen3.6-plus`       | Нужен reasoning и анализ              |
+| Content Strategy Agent      | Контентные столпы и воронка             | `qwen3.6-plus`       | `nemotron:free`      | Сложная SMM-сборка                    |
+| Rubricator Agent            | Рубрики и темы                          | `deepseek-chat`      | `qwen3.6-plus`       | Генеративная задача средней сложности |
+| Pain-Based Generator        | Идеи от болей                           | `deepseek-chat`      | `qwen3.6-plus`       | Массовая генерация                    |
+| Trigger-Based Generator     | Идеи от триггеров                       | `deepseek-chat`      | `qwen3.6-plus`       | Массовая генерация                    |
+| Competitor Gap Generator    | Идеи от слабостей конкурентов           | `qwen3.6-plus`       | `nemotron:free`      | Нужна отстройка                       |
+| Funnel-Based Generator      | Идеи под воронку                        | `deepseek-chat`      | `nemotron:free`      | Генерация + структура                 |
+| Platform Format Generator   | Идеи под Reels / Shorts / TikTok / VK   | `deepseek-chat`      | `qwen3.6-flash`      | Форматная генерация                   |
+| Deduplication Agent         | Удаление дублей                         | `qwen3.6-flash`      | `deepseek-chat`      | Быстрая логическая проверка           |
+| Idea Critic Agent           | Скоринг идей                            | `nemotron:free`      | `qwen3.6-plus`       | Строгий reasoning                     |
+| Garbage Filter Agent        | Анти-мусорный фильтр                    | `nemotron:free`      | `qwen3.6-plus`       | Критический gate                      |
+| Idea Improvement Agent      | Улучшение слабых идей                   | `deepseek-chat`      | `qwen3.6-plus`       | Креативная переработка                |
+| Second Critic Agent         | Повторная проверка                      | `nemotron:free`      | `qwen3.6-plus`       | Независимый контроль                  |
+| Script Writer Agent         | Сценарии видео                          | `qwen3.6-plus`       | `deepseek-chat`      | Лучше качество текста                 |
+| Script Critic Agent         | Проверка сценариев                      | `nemotron:free`      | `qwen3.6-plus`       | Строгая оценка                        |
+| CTA Critic Agent            | Проверка CTA                            | `qwen3.6-flash`      | `nemotron:free`      | Простая, но важная проверка           |
+| Platform Adaptation Agent   | Адаптация под площадку                  | `deepseek-chat`      | `qwen3.6-plus`       | Текстовая адаптация                   |
+| Final Content Pack Agent    | Финальная сборка                        | `qwen3.6-flash`      | `qwen3.6-plus`       | Сборка JSON и итогового пакета        |
 
 ---
 
@@ -873,12 +858,12 @@ POST /projects/{id}/export
 Использовать, если пользователь тестирует систему.
 
 ```text
-Brief: Gemini Flash-Lite
-Analysis: DeepSeek
-Strategy: DeepSeek
-Ideas: DeepSeek
-Critics: Gemini Flash-Lite
-Scripts: DeepSeek
+Brief:    qwen/qwen3.6-flash
+Analysis: deepseek/deepseek-chat
+Strategy: deepseek/deepseek-chat
+Ideas:    deepseek/deepseek-chat
+Critics:  qwen/qwen3.6-flash
+Scripts:  deepseek/deepseek-chat
 ```
 
 ## 12.2. Balanced Mode
@@ -886,14 +871,14 @@ Scripts: DeepSeek
 Основной режим.
 
 ```text
-Brief: Gemini Flash-Lite
-Audience: DeepSeek
-Pain/Trigger: Qwen
-Strategy: Qwen
-Ideas: DeepSeek
-Critics: Gemini 2.5 Flash
-Scripts: Qwen
-Final: Gemini Flash-Lite
+Brief:         qwen/qwen3.6-flash
+Audience:      deepseek/deepseek-chat
+Pain/Trigger:  qwen/qwen3.6-plus
+Strategy:      qwen/qwen3.6-plus
+Ideas:         deepseek/deepseek-chat
+Critics:       nvidia/nemotron-3-nano-omni-30b-a3b-reasoning:free
+Scripts:       qwen/qwen3.6-plus
+Final:         qwen/qwen3.6-flash
 ```
 
 ## 12.3. High Quality Mode
@@ -901,14 +886,14 @@ Final: Gemini Flash-Lite
 Для дорогих клиентов или сложных ниш.
 
 ```text
-Brief: Gemini 2.5 Flash
-Audience: Qwen
-Pain/Trigger: Qwen
-Strategy: Gemini 2.5 Flash / Qwen
-Ideas: DeepSeek + Qwen
-Critics: Gemini 2.5 Flash
-Scripts: Qwen
-Escalation: Claude Sonnet 4.6
+Brief:      nvidia/nemotron-3-nano-omni-30b-a3b-reasoning:free
+Audience:   qwen/qwen3.6-plus
+Pain/Trigger: qwen/qwen3.6-plus
+Strategy:   nvidia/nemotron-3-nano-omni-30b-a3b-reasoning:free + qwen/qwen3.6-plus
+Ideas:      deepseek/deepseek-chat + qwen/qwen3.6-plus
+Critics:    nvidia/nemotron-3-nano-omni-30b-a3b-reasoning:free
+Scripts:    qwen/qwen3.6-plus
+Escalation: qwen/qwen3.6-plus
 ```
 
 ---
@@ -996,32 +981,32 @@ Deployment production: Docker Compose / managed containers
 ## Основная модельная политика
 
 ```text
-Дешевые служебные задачи:
-google/gemini-2.5-flash-lite
+Быстрые служебные задачи (бриф, дедупликация, финальная сборка):
+qwen/qwen3.6-flash
 
-Массовая генерация:
+Массовая генерация (идеи, рубрикатор, сценарии-черновики):
 deepseek/deepseek-chat
 
-Стратегия и сложная смысловая сборка:
+Стратегия и сложная смысловая сборка (позиционирование, боли, сценарии):
 qwen/qwen3.6-plus
 
-Критика и контроль качества:
-google/gemini-2.5-flash
+Критика и контроль качества (idea critic, garbage filter, script critic):
+nvidia/nemotron-3-nano-omni-30b-a3b-reasoning:free
 
-Премиум-эскалация:
-anthropic/claude-sonnet-4.6
+Эскалация для сложных задач:
+qwen/qwen3.6-plus
 ```
 
 Главная логика: **дешевая модель на объем, сильная модель на стратегию, строгая модель на контроль качества, премиум-модель только на исключения**. Так система не будет оверпрайс, но сохранит надежность на критических участках.
 
-[1]: https://openrouter.ai/google/gemini-2.5-flash-lite "Gemini 2.5 Flash Lite - API Pricing & Benchmarks | OpenRouter"
+[1]: https://openrouter.ai/google/gemini-2.5-flash-lite "Nvidia Nemotron Lite - API Pricing & Benchmarks | OpenRouter"
 [2]: https://openrouter.ai/deepseek/deepseek-chat "DeepSeek V3 - API Pricing & Providers | OpenRouter"
 [3]: https://openrouter.ai/qwen/qwen3.6-plus "Qwen3.6 Plus - API Pricing & Providers | OpenRouter"
-[4]: https://openrouter.ai/google/gemini-2.5-flash "Gemini 2.5 Flash - API Pricing & Benchmarks | OpenRouter"
+[4]: https://openrouter.ai/google/gemini-2.5-flash "Nvidia Nemotron - API Pricing & Benchmarks | OpenRouter"
 [5]: https://openrouter.ai/docs/quickstart "OpenRouter Quickstart Guide | Developer Documentation | OpenRouter | Documentation"
 [6]: https://openrouter.ai/docs/guides/routing/provider-selection "Provider Routing | Intelligent Multi-Provider Request Routing | OpenRouter | Documentation"
 [7]: https://openrouter.ai/google/gemini-3-flash-preview/pricing "Google: Gemini 3 Flash Preview – Effective Pricing | OpenRouter"
-[8]: https://openrouter.ai/anthropic/claude-sonnet-4.6 "Claude Sonnet 4.6 - API Pricing & Providers | OpenRouter"
+[8]: https://openrouter.ai/anthropic/claude-sonnet-4.6 "Qwen Plus - API Pricing & Providers | OpenRouter"
 [9]: https://openrouter.ai/docs/guides/features/structured-outputs "Structured Outputs | Enforce JSON Schema in OpenRouter API Responses | OpenRouter | Documentation"
 [10]: https://fastapi.tiangolo.com/ "FastAPI"
 [11]: https://docs.langchain.com/oss/python/langgraph/overview "LangGraph overview - Docs by LangChain"
