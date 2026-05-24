@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from typing import Any, Literal
 
-from pydantic import BaseModel, ConfigDict, Field, field_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 
 Confidence = Literal["low", "medium", "high"]
@@ -160,6 +160,24 @@ class PainTriggerOutput(AgentOutput):
     high_potential_angles: list[str] = Field(default_factory=list)
 
 
+class ContextAuditIssue(AgentModel):
+    field: str = ""
+    problem: str = ""
+    recommendation: str = ""
+    severity: Priority = "medium"
+
+
+class ContextAuditOutput(AgentOutput):
+    audit_status: Literal["pass", "needs_attention"] = "pass"
+    project_summary: str = ""
+    brand_fit_notes: list[str] = Field(default_factory=list)
+    segment_fit_notes: list[str] = Field(default_factory=list)
+    missing_or_weak_fields: list[str] = Field(default_factory=list)
+    issues: list[ContextAuditIssue] = Field(default_factory=list)
+    must_use_context_terms: list[str] = Field(default_factory=list)
+    forbidden_generic_angles: list[str] = Field(default_factory=list)
+
+
 class Positioning(AgentModel):
     short_positioning: str = ""
     expanded_positioning: str = ""
@@ -248,6 +266,23 @@ class ContentIdea(AgentModel):
     idea_id: str = ""
     idea_title: str = ""
 
+    @model_validator(mode="before")
+    @classmethod
+    def accept_common_aliases(cls, data: Any) -> Any:
+        if not isinstance(data, dict):
+            return data
+        normalized = dict(data)
+        _copy_first_present(normalized, "idea_id", ("id", "ideaId"))
+        _copy_first_present(normalized, "idea_title", ("title", "name", "topic"))
+        _copy_first_present(normalized, "source_agent", ("source", "generator"))
+        _copy_first_present(normalized, "target_persona", ("persona", "persona_id"))
+        _copy_first_present(normalized, "pain", ("pain_point", "problem"))
+        _copy_first_present(normalized, "main_trigger", ("trigger",))
+        _copy_first_present(normalized, "rough_hook", ("hook",))
+        _copy_first_present(normalized, "viewer_next_step", ("next_step",))
+        _copy_first_present(normalized, "suggested_cta_type", ("cta_type",))
+        return normalized
+
     @field_validator("idea_id", mode="before")
     @classmethod
     def coerce_idea_id(cls, v: Any) -> str:
@@ -281,6 +316,17 @@ class UniqueIdea(AgentModel):
     idea_title: str = ""
     source_agent: str = ""
     reason_kept: str = ""
+
+    @model_validator(mode="before")
+    @classmethod
+    def accept_common_aliases(cls, data: Any) -> Any:
+        if not isinstance(data, dict):
+            return data
+        normalized = dict(data)
+        _copy_first_present(normalized, "idea_id", ("id", "ideaId"))
+        _copy_first_present(normalized, "idea_title", ("title", "name", "topic"))
+        _copy_first_present(normalized, "source_agent", ("source", "generator"))
+        return normalized
 
 
 class DuplicateGroup(AgentModel):
@@ -317,6 +363,18 @@ class EvaluatedIdea(AgentModel):
     main_issue: str = ""
     recommendation: str = ""
 
+    @model_validator(mode="before")
+    @classmethod
+    def accept_common_aliases(cls, data: Any) -> Any:
+        if not isinstance(data, dict):
+            return data
+        normalized = dict(data)
+        _copy_first_present(normalized, "idea_id", ("id", "ideaId"))
+        _copy_first_present(normalized, "idea_title", ("title", "name", "topic"))
+        _copy_first_present(normalized, "weighted_score", ("score", "total_score", "quality_score"))
+        _copy_first_present(normalized, "critic_comment", ("comment", "reason"))
+        return normalized
+
 
 class CriticSummary(AgentModel):
     approved_count: int = 0
@@ -334,6 +392,17 @@ class PassedIdea(AgentModel):
     idea_title: str = ""
     reason_passed: str = ""
 
+    @model_validator(mode="before")
+    @classmethod
+    def accept_common_aliases(cls, data: Any) -> Any:
+        if not isinstance(data, dict):
+            return data
+        normalized = dict(data)
+        _copy_first_present(normalized, "idea_id", ("id", "ideaId"))
+        _copy_first_present(normalized, "idea_title", ("title", "name", "topic"))
+        _copy_first_present(normalized, "reason_passed", ("reason", "comment"))
+        return normalized
+
 
 class GarbageRejectedIdea(AgentModel):
     idea_id: str = ""
@@ -341,12 +410,34 @@ class GarbageRejectedIdea(AgentModel):
     garbage_reasons: list[str] = Field(default_factory=list)
     short_explanation: str = ""
 
+    @model_validator(mode="before")
+    @classmethod
+    def accept_common_aliases(cls, data: Any) -> Any:
+        if not isinstance(data, dict):
+            return data
+        normalized = dict(data)
+        _copy_first_present(normalized, "idea_id", ("id", "ideaId"))
+        _copy_first_present(normalized, "idea_title", ("title", "name", "topic"))
+        _copy_first_present(normalized, "short_explanation", ("reason", "comment"))
+        return normalized
+
 
 class BorderlineIdea(AgentModel):
     idea_id: str = ""
     idea_title: str = ""
     problem: str = ""
     can_be_improved: bool = False
+
+    @model_validator(mode="before")
+    @classmethod
+    def accept_common_aliases(cls, data: Any) -> Any:
+        if not isinstance(data, dict):
+            return data
+        normalized = dict(data)
+        _copy_first_present(normalized, "idea_id", ("id", "ideaId"))
+        _copy_first_present(normalized, "idea_title", ("title", "name", "topic"))
+        _copy_first_present(normalized, "problem", ("issue", "reason"))
+        return normalized
 
 
 class GarbageFilterOutput(AgentOutput):
@@ -369,6 +460,19 @@ class ImprovedIdea(AgentModel):
     why_now_it_works: str = ""
     quality_check: bool = False
 
+    @model_validator(mode="before")
+    @classmethod
+    def accept_common_aliases(cls, data: Any) -> Any:
+        if not isinstance(data, dict):
+            return data
+        normalized = dict(data)
+        _copy_first_present(normalized, "idea_id", ("id", "ideaId"))
+        _copy_first_present(normalized, "idea_title", ("title", "name", "topic"))
+        _copy_first_present(normalized, "pain", ("pain_point", "problem"))
+        _copy_first_present(normalized, "rough_hook", ("hook",))
+        _copy_first_present(normalized, "why_now_it_works", ("why_it_can_work", "why_works"))
+        return normalized
+
 
 class IdeaImprovementOutput(AgentOutput):
     improved_ideas: list[ImprovedIdea] = Field(default_factory=list)
@@ -390,6 +494,18 @@ class VideoScript(AgentModel):
     @classmethod
     def coerce_id_to_str(cls, v: Any) -> str:
         return str(v) if v is not None else ""
+
+    @model_validator(mode="before")
+    @classmethod
+    def accept_common_aliases(cls, data: Any) -> Any:
+        if not isinstance(data, dict):
+            return data
+        normalized = dict(data)
+        _copy_first_present(normalized, "script_id", ("id", "scriptId"))
+        _copy_first_present(normalized, "idea_id", ("ideaId",))
+        _copy_first_present(normalized, "scene_by_scene", ("scenes", "steps"))
+        _copy_first_present(normalized, "core_message", ("message", "main_message"))
+        return normalized
     title: str = ""
     target_persona: str = ""
     funnel_stage: FunnelStage = "awareness"
@@ -406,6 +522,90 @@ class VideoScript(AgentModel):
 
 class ScriptsOutput(AgentOutput):
     scripts: list[VideoScript] = Field(default_factory=list)
+
+
+class ReferenceVideoPattern(AgentModel):
+    pattern_id: str = ""
+    segment: str = ""
+    format_name: str = ""
+    example_description: str = ""
+    hook_pattern: str = ""
+    structure: list[str] = Field(default_factory=list)
+    why_relevant: str = ""
+    adaptation_notes: list[str] = Field(default_factory=list)
+
+
+class ReferenceVideoPatternsOutput(AgentOutput):
+    patterns: list[ReferenceVideoPattern] = Field(default_factory=list)
+    usage_rules: list[str] = Field(default_factory=list)
+    warnings: list[str] = Field(default_factory=list)
+
+
+class TopicAngle(AgentModel):
+    idea_id: str = ""
+    angle_id: str = ""
+    motivation_type: Literal[
+        "avoid_pain",
+        "trigger_attention",
+        "move_through_funnel",
+        "achieve_desire",
+        "express_identity",
+        "feel_belonging",
+        "enjoy_process",
+        "make_progress",
+        "mixed",
+    ] = "mixed"
+    video_angle: str = ""
+    audience_insight: str = ""
+    emotional_job: str = ""
+    why_it_can_work: str = ""
+    risk_notes: list[str] = Field(default_factory=list)
+
+    @field_validator("idea_id", "angle_id", mode="before")
+    @classmethod
+    def coerce_ids(cls, v: Any) -> str:
+        return str(v) if v is not None else ""
+
+
+class IdeaTopicAngles(AgentModel):
+    idea_id: str = ""
+    suggested_angles: list[TopicAngle] = Field(default_factory=list)
+    selected_angle_id: str = ""
+    selected_angle_reason: str = ""
+
+    @field_validator("idea_id", "selected_angle_id", mode="before")
+    @classmethod
+    def coerce_ids(cls, v: Any) -> str:
+        return str(v) if v is not None else ""
+
+
+class TopicAnglesOutput(AgentOutput):
+    topic_angles: list[IdeaTopicAngles] = Field(default_factory=list)
+
+
+class HookCandidate(AgentModel):
+    hook: str = ""
+    mechanic: str = ""
+    why_it_can_work: str = ""
+    risk: str = ""
+    score: int = Field(default=0, ge=0, le=10)
+
+
+class IdeaHooks(AgentModel):
+    idea_id: str = ""
+    angle_id: str = ""
+    hooks: list[HookCandidate] = Field(default_factory=list)
+    best_hook: str = ""
+    best_hook_reason: str = ""
+
+    @field_validator("idea_id", "angle_id", mode="before")
+    @classmethod
+    def coerce_ids(cls, v: Any) -> str:
+        return str(v) if v is not None else ""
+
+
+class HookGeneratorOutput(AgentOutput):
+    hooks: list[IdeaHooks] = Field(default_factory=list)
 
 
 class ScriptScores(AgentModel):
@@ -444,6 +644,71 @@ class ScriptReview(AgentModel):
 
 class ScriptCriticOutput(AgentOutput):
     script_reviews: list[ScriptReview] = Field(default_factory=list)
+
+
+class RetentionPhase(AgentModel):
+    time: str = ""
+    task: str = ""
+    tool: str = ""
+
+
+class ScriptRetentionReview(AgentModel):
+    script_id: str = ""
+    idea_id: str = ""
+
+    @field_validator("script_id", "idea_id", mode="before")
+    @classmethod
+    def coerce_ids(cls, v: Any) -> str:
+        return str(v) if v is not None else ""
+
+    anti_scroll_score: int = Field(default=0, ge=0, le=100)
+    retention_map: list[RetentionPhase] = Field(default_factory=list)
+    drop_off_risk: str = ""
+    strongest_part: str = ""
+    weakest_part: str = ""
+    improvement_tip: str = ""
+
+
+class RetentionOptimizerOutput(AgentOutput):
+    script_reviews: list[ScriptRetentionReview] = Field(default_factory=list)
+
+
+class BlindScriptReview(AgentModel):
+    script_id: str = ""
+    idea_id: str = ""
+
+    @field_validator("script_id", "idea_id", mode="before")
+    @classmethod
+    def coerce_ids(cls, v: Any) -> str:
+        return str(v) if v is not None else ""
+
+    @model_validator(mode="before")
+    @classmethod
+    def accept_common_aliases(cls, data: Any) -> Any:
+        if not isinstance(data, dict):
+            return data
+        normalized = dict(data)
+        _copy_first_present(normalized, "script_id", ("id", "scriptId"))
+        _copy_first_present(normalized, "idea_id", ("ideaId",))
+        _copy_first_present(normalized, "similarity_score", ("score", "alignment_score"))
+        _copy_first_present(normalized, "is_semantically_aligned", ("passed", "is_aligned"))
+        return normalized
+
+    blind_summary_before_comparison: str = ""
+    inferred_project_type: str = ""
+    inferred_product_or_service: str = ""
+    inferred_audience: str = ""
+    inferred_pain: str = ""
+    similarity_score: int = Field(default=0, ge=0, le=100)
+    is_semantically_aligned: bool = False
+    mismatch_notes: list[str] = Field(default_factory=list)
+    required_fixes: list[str] = Field(default_factory=list)
+
+
+class BlindScriptCheckOutput(AgentOutput):
+    script_reviews: list[BlindScriptReview] = Field(default_factory=list)
+    passed_count: int = 0
+    rejected_count: int = 0
 
 
 class ScriptRefinerOutput(AgentOutput):
@@ -519,3 +784,13 @@ class FinalContentPackOutput(AgentOutput):
 class PipelineResult(AgentModel):
     outputs: dict[str, Any] = Field(default_factory=dict)
     final_content_pack: FinalContentPackOutput = Field(default_factory=FinalContentPackOutput)
+
+
+def _copy_first_present(data: dict[str, Any], target: str, sources: tuple[str, ...]) -> None:
+    if data.get(target):
+        return
+    for source in sources:
+        value = data.get(source)
+        if value:
+            data[target] = value
+            return

@@ -26,6 +26,7 @@ class Settings(BaseSettings):
     )
     telegram_bot_token: str | None = None
     bot_polling_timeout: int = 30
+    pipeline_trace_dir: str = "logs/pipeline_runs"
 
     model_config = SettingsConfigDict(
         env_file=".env",

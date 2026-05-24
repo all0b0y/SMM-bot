@@ -5,17 +5,26 @@ import logging
 from dataclasses import dataclass
 
 from aiogram import F, Router
+from aiogram.exceptions import TelegramBadRequest
 from aiogram.filters import Command, CommandStart
 from aiogram.types import CallbackQuery, InlineKeyboardButton, InlineKeyboardMarkup, Message
 from sqlalchemy import select
 
 from smm_bot.agents.registry import MVP_GRAPH
-from smm_bot.db.models import FinalContentPack as FinalContentPackRow
+from smm_bot.agents.schemas import BriefOutput
+from smm_bot.db.models import (
+    FinalContentPack as FinalContentPackRow,
+    PipelineRun,
+    Project,
+    User,
+)
 from smm_bot.db.session import async_session_factory
 from smm_bot.repositories.pipeline_runs import PipelineRunRepository
 from smm_bot.repositories.projects import ProjectInputRepository, ProjectRepository
 from smm_bot.repositories.users import UserRepository
+from smm_bot.services.brief_questions import format_brief_questions
 from smm_bot.services.pipeline_runner import format_content_page, get_run_status_text
+from smm_bot.services.input_normalizer import MIN_DESCRIPTION_CHARS, normalize_pipeline_input
 from smm_bot.tasks.pipeline import run_pipeline_task
 
 
@@ -36,50 +45,20 @@ class BotUserSettings:
 
 USER_SETTINGS: dict[int, BotUserSettings] = {}
 LAST_DESCRIPTION: dict[int, str] = {}
+CLARIFIED_DESCRIPTION: dict[int, str] = {}
 AWAITING_CLARIFICATION: set[int] = set()
 # {user_id: (run_id, page_index, script_dict)} — ждём текст для доработки
 AWAITING_REFINEMENT: dict[int, tuple[str, int, dict]] = {}
 
 
 QUALITY_MODES = {
-    "economy": {
-        "title": "Экономный",
-        "description": "Быстрее и дешевле. Подходит для тестов и черновиков.",
-        "models": [
-            "Brief: Qwen Flash",
-            "Analysis: DeepSeek",
-            "Strategy: DeepSeek",
-            "Ideas: DeepSeek",
-            "Critics: Qwen Flash",
-            "Scripts: DeepSeek",
-        ],
-    },
     "balanced": {
-        "title": "Баланс",
-        "description": "Основной режим MVP: хорошее качество без лишней стоимости.",
+        "title": "Единый режим",
+        "description": "Одна стабильная модельная политика для всех запусков.",
         "models": [
-            "Brief: Qwen Flash",
-            "Audience: DeepSeek",
-            "Pain/Trigger: Qwen",
-            "Strategy: Qwen",
-            "Ideas: DeepSeek",
-            "Critics: Nvidia Nemotron",
-            "Scripts: Qwen",
-            "Final: Qwen Flash",
-        ],
-    },
-    "high_quality": {
-        "title": "Высокое качество",
-        "description": "Для сложных ниш и важных клиентов. Медленнее, но глубже.",
-        "models": [
-            "Brief: Nvidia Nemotron",
-            "Audience: Qwen",
-            "Pain/Trigger: Qwen",
-            "Strategy: Nvidia Nemotron / Qwen",
-            "Ideas: DeepSeek + Qwen",
-            "Critics: Nvidia Nemotron",
-            "Scripts: Qwen",
-            "Escalation: Qwen Plus",
+            "Маркетинговый анализ и проверки: openrouter/owl-alpha",
+            "Структурные и лёгкие задачи: deepseek/deepseek-v4-flash",
+            "Креатив, идеи и сценарии: deepseek/deepseek-v4-pro",
         ],
     },
 }
@@ -87,6 +66,25 @@ QUALITY_MODES = {
 
 def get_settings(user_id: int) -> BotUserSettings:
     return USER_SETTINGS.setdefault(user_id, BotUserSettings())
+
+
+def _clear_user_project_state(user_id: int) -> None:
+    LAST_DESCRIPTION.pop(user_id, None)
+    CLARIFIED_DESCRIPTION.pop(user_id, None)
+    AWAITING_CLARIFICATION.discard(user_id)
+    AWAITING_REFINEMENT.pop(user_id, None)
+
+
+async def _safe_callback_answer(
+    callback: CallbackQuery,
+    text: str | None = None,
+    *,
+    show_alert: bool = False,
+) -> None:
+    try:
+        await callback.answer(text, show_alert=show_alert)
+    except TelegramBadRequest as exc:
+        logger.debug("[bot] callback answer skipped  user=%s: %s", callback.from_user.id, exc)
 
 
 def main_menu_keyboard() -> InlineKeyboardMarkup:
@@ -98,24 +96,15 @@ def main_menu_keyboard() -> InlineKeyboardMarkup:
             ],
             [
                 InlineKeyboardButton(text="⚙️ Настройки", callback_data="menu:settings"),
-                InlineKeyboardButton(text="🤖 Модели", callback_data="menu:models"),
             ],
         ]
     )
 
 
 def settings_keyboard(selected_mode: str) -> InlineKeyboardMarkup:
-    def mode_button(mode: str) -> InlineKeyboardButton:
-        prefix = "✅ " if mode == selected_mode else ""
-        return InlineKeyboardButton(
-            text=f"{prefix}{QUALITY_MODES[mode]['title']}",
-            callback_data=f"settings:mode:{mode}",
-        )
-
     return InlineKeyboardMarkup(
         inline_keyboard=[
-            [mode_button("economy"), mode_button("balanced")],
-            [mode_button("high_quality")],
+            [InlineKeyboardButton(text="🤖 Модельная политика", callback_data="menu:models")],
             [
                 InlineKeyboardButton(text="📋 Что нужно", callback_data="menu:requirements"),
                 InlineKeyboardButton(text="⬅️ Меню", callback_data="menu:home"),
@@ -197,12 +186,11 @@ def _run_script_refiner(script_dict: dict, user_feedback: str, brief_dict: dict,
     return result.refined_script.model_dump()
 
 
-def _run_brief_get_questions(description: str) -> str:
+def _run_brief_get_questions(description: str, max_questions: int = 10) -> str:
     """Sync: run brief agent and return formatted questions from missing_data."""
     from smm_bot.agents.llm import OpenRouterLLMClient
     from smm_bot.agents.prompts import render_prompt
     from smm_bot.agents.registry import MVP_AGENT_REGISTRY
-    from smm_bot.agents.schemas import BriefOutput
     from smm_bot.core.config import get_settings as get_app_settings
 
     cfg = get_app_settings()
@@ -211,20 +199,13 @@ def _run_brief_get_questions(description: str) -> str:
     prompt = render_prompt("brief", {"company_description": description})
     brief = llm.complete(agent=agent, user_prompt=prompt, output_schema=BriefOutput)
 
-    questions: list[str] = []
-    for item in brief.missing_data[:5]:
-        questions.append(f"{len(questions) + 1}. {item}")
-    for assumption in brief.assumptions:
-        if assumption.confidence == "low" and len(questions) < 5:
-            questions.append(f"{len(questions) + 1}. Уточни: {assumption.assumption}?")
-    return "\n".join(questions)
+    return format_brief_questions(brief, max_questions=max_questions)
 
 
 def clarification_ready_keyboard() -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(
         inline_keyboard=[
             [InlineKeyboardButton(text="🚀 Запустить с уточнениями", callback_data="project:run")],
-            [InlineKeyboardButton(text="↩️ Запустить без уточнений", callback_data="project:run_original")],
         ]
     )
 
@@ -271,48 +252,40 @@ def requirements_text() -> str:
 
 
 def settings_text(settings: BotUserSettings) -> str:
-    mode = QUALITY_MODES[settings.quality_mode]
     return (
         "Настройки бота\n\n"
-        f"Режим качества: {mode['title']}\n"
-        f"Описание: {mode['description']}\n"
+        "Режим генерации: единый\n"
         f"Площадка: {settings.platform}\n"
         f"Идей: {settings.ideas_count}\n"
         f"Сценариев: {settings.scripts_count}\n\n"
-        "Выберите режим качества ниже."
+        "Выбор тарифов отключён: все запуски используют одну модельную политику."
     )
 
 
 def models_text(settings: BotUserSettings) -> str:
-    lines = ["Модельная политика по режимам:\n"]
-    for mode_key, mode in QUALITY_MODES.items():
-        selected = " ← выбран" if mode_key == settings.quality_mode else ""
-        lines.append(f"{mode['title']}{selected}")
-        lines.append(mode["description"])
-        lines.extend(f"• {model}" for model in mode["models"])
-        lines.append("")
+    mode = QUALITY_MODES["balanced"]
+    lines = [f"{mode['title']}\n", mode["description"]]
+    lines.extend(f"• {model}" for model in mode["models"])
     return "\n".join(lines).strip()
 
 
 def accepted_description_text(settings: BotUserSettings) -> str:
-    mode = QUALITY_MODES[settings.quality_mode]
     total_ideas = settings.ideas_count * 3
     return (
         "Отлично, вводные приняты.\n\n"
         "Я вижу базу для SMM-разбора. Перед запуском можно изменить настройки или сразу "
         "нажать кнопку генерации.\n\n"
-        f"Текущий режим: {mode['title']}\n"
+        "Режим: единый\n"
         f"Площадка: {settings.platform}\n"
         f"Идей (3 генератора × {settings.ideas_count}): ~{total_ideas}\n"
         f"Финальных сценариев: {settings.scripts_count} лучших"
     )
 
 
-def initial_loading_text(mode_title: str) -> str:
+def initial_loading_text() -> str:
     bar = "░" * 16
     return (
         f"⚙️ Генерирую контент-пак\n\n"
-        f"Режим: {mode_title}\n\n"
         f"[{bar}] 0/{TOTAL_AGENTS}\n\n"
         f"🚀 Запускаю агентов...\n"
         f"   Разогреваю нейроны, подождите...\n\n"
@@ -323,6 +296,7 @@ def initial_loading_text(mode_title: str) -> str:
 @router.message(CommandStart())
 async def start(message: Message) -> None:
     logger.info("[bot] /start  user=%s", message.from_user.id)
+    _clear_user_project_state(message.from_user.id)
     await message.answer(welcome_text(), reply_markup=main_menu_keyboard())
 
 
@@ -336,6 +310,44 @@ async def menu_command(message: Message) -> None:
 async def help_command(message: Message) -> None:
     logger.info("[bot] /help  user=%s", message.from_user.id)
     await message.answer(requirements_text(), reply_markup=main_menu_keyboard())
+
+
+@router.message(Command("last"))
+async def last_result_command(message: Message) -> None:
+    logger.info("[bot] /last  user=%s", message.from_user.id)
+    async with async_session_factory() as session:
+        statement = (
+            select(FinalContentPackRow, PipelineRun.id)
+            .join(PipelineRun, FinalContentPackRow.pipeline_run_id == PipelineRun.id)
+            .join(Project, PipelineRun.project_id == Project.id)
+            .join(User, Project.user_id == User.id)
+            .where(User.telegram_user_id == message.from_user.id)
+            .where(PipelineRun.status == "completed")
+            .order_by(PipelineRun.finished_at.desc())
+            .limit(1)
+        )
+        row = (await session.execute(statement)).first()
+
+    if row is None:
+        await message.answer(
+            "Пока нет готовых запусков. Пришлите описание бизнеса и запустите генерацию.",
+            reply_markup=main_menu_keyboard(),
+        )
+        return
+
+    pack_row, run_id = row
+    approved = pack_row.approved_content or []
+    if not approved:
+        await message.answer(
+            f"Последний запуск найден, но финальные сценарии пустые.\n\nRun ID: {run_id}",
+            reply_markup=main_menu_keyboard(),
+        )
+        return
+
+    await message.answer(
+        format_content_page(approved[0], 0, len(approved)),
+        reply_markup=content_nav_keyboard(str(run_id), 0, len(approved)),
+    )
 
 
 @router.message(Command("settings"))
@@ -355,6 +367,7 @@ async def home_callback(callback: CallbackQuery) -> None:
 @router.callback_query(F.data == "menu:start")
 async def start_project_callback(callback: CallbackQuery) -> None:
     logger.debug("[bot] callback=menu:start  user=%s", callback.from_user.id)
+    _clear_user_project_state(callback.from_user.id)
     await callback.message.answer(
         "Стартуем. Пришлите описание бизнеса одним сообщением.\n\n"
         "Чем подробнее вводные, тем точнее будут сегменты, боли, идеи и сценарии.",
@@ -391,17 +404,12 @@ async def models_callback(callback: CallbackQuery) -> None:
 
 @router.callback_query(F.data.startswith("settings:mode:"))
 async def set_quality_mode_callback(callback: CallbackQuery) -> None:
-    mode = callback.data.rsplit(":", 1)[-1]
-    if mode not in QUALITY_MODES:
-        await callback.answer("Неизвестный режим", show_alert=True)
-        return
-
     settings = get_settings(callback.from_user.id)
-    settings.quality_mode = mode
-    logger.info("[bot] mode changed  user=%s  mode=%s", callback.from_user.id, mode)
+    settings.quality_mode = "balanced"
+    logger.info("[bot] deprecated mode callback ignored  user=%s", callback.from_user.id)
     await callback.message.answer(
-        f"Готово. Режим качества: {QUALITY_MODES[mode]['title']}",
-        reply_markup=settings_keyboard(mode),
+        "Выбор режимов отключён. Используется единая модельная политика.",
+        reply_markup=settings_keyboard(settings.quality_mode),
     )
     await callback.answer()
 
@@ -425,6 +433,7 @@ async def clarify_callback(callback: CallbackQuery) -> None:
         questions = ""
 
     if not questions:
+        CLARIFIED_DESCRIPTION[user_id] = description
         await status_msg.edit_text(
             "Описание достаточно полное, вопросов нет. Можно запускать!",
             reply_markup=start_project_keyboard(),
@@ -450,11 +459,31 @@ async def run_original_callback(callback: CallbackQuery) -> None:
 async def run_project_callback(callback: CallbackQuery) -> None:
     description = LAST_DESCRIPTION.get(callback.from_user.id)
     if not description:
-        await callback.answer("Сначала пришлите описание бизнеса.", show_alert=True)
+        await _safe_callback_answer(callback, "Сначала пришлите описание бизнеса.", show_alert=True)
         return
 
     settings = get_settings(callback.from_user.id)
-    mode = QUALITY_MODES[settings.quality_mode]
+    await _safe_callback_answer(callback, "Проверяю вводные...")
+
+    if CLARIFIED_DESCRIPTION.get(callback.from_user.id) != description:
+        status_msg = await callback.message.answer("🔍 Проверяю вводные перед запуском...")
+        logger.info("[bot] preflight brief analysis  user=%s", callback.from_user.id)
+        try:
+            questions = await asyncio.to_thread(_run_brief_get_questions, description, 10)
+        except Exception as exc:
+            logger.warning("[bot] preflight brief analysis failed: %s", exc)
+            questions = ""
+
+        if questions:
+            AWAITING_CLARIFICATION.add(callback.from_user.id)
+            await status_msg.edit_text(
+                "Перед запуском нужно уточнить вводные, чтобы не получить пустой результат.\n\n"
+                f"{questions}\n\n"
+                "Ответьте одним сообщением — что знаете, в любом порядке. После этого запустим генерацию.",
+            )
+            return
+
+        CLARIFIED_DESCRIPTION[callback.from_user.id] = description
 
     run_id = await _create_pipeline_run_from_callback(callback, description, settings)
     logger.info(
@@ -465,13 +494,12 @@ async def run_project_callback(callback: CallbackQuery) -> None:
     )
 
     # Send live progress message and grab its ID so the worker can edit it
-    loading_msg = await callback.message.answer(initial_loading_text(mode["title"]))
+    loading_msg = await callback.message.answer(initial_loading_text())
     message_id = loading_msg.message_id
 
     run_pipeline_task.delay(run_id, callback.message.chat.id, message_id)
     logger.info("[bot] task queued  run=%s  chat=%s  msg=%s", run_id, callback.message.chat.id, message_id)
-
-    await callback.answer("Запуск создан")
+    _clear_user_project_state(callback.from_user.id)
 
 
 @router.callback_query(F.data == "content:noop")
@@ -618,9 +646,24 @@ async def accept_company_description(message: Message) -> None:
         AWAITING_CLARIFICATION.discard(user_id)
         base = LAST_DESCRIPTION.get(user_id, "")
         enriched = f"{base}\n\n--- Уточнения от пользователя ---\n{text}"
-        LAST_DESCRIPTION[user_id] = enriched
+        normalized = normalize_pipeline_input(
+            raw_text=enriched,
+            platform=settings.platform,
+            quality_mode=settings.quality_mode,
+            ideas_count=settings.ideas_count,
+            scripts_count=settings.scripts_count,
+            telegram_user_id=user_id,
+            telegram_username=message.from_user.username,
+            first_name=message.from_user.first_name,
+            last_name=message.from_user.last_name,
+            language_code=message.from_user.language_code,
+            telegram_chat_id=message.chat.id,
+            telegram_message_id=message.message_id,
+        )
+        LAST_DESCRIPTION[user_id] = normalized.normalized_text
+        CLARIFIED_DESCRIPTION[user_id] = normalized.normalized_text
         logger.info("[bot] clarification received  user=%s  added_len=%d  total_len=%d",
-                    user_id, len(text), len(enriched))
+                    user_id, len(text), len(normalized.normalized_text))
         await message.answer(
             "Уточнения добавлены к описанию. Теперь у меня больше данных для анализа.\n\n"
             "Запускаем?",
@@ -628,8 +671,30 @@ async def accept_company_description(message: Message) -> None:
         )
         return
 
-    if len(text) < 30:
-        logger.debug("[bot] description too short  user=%s  len=%d", user_id, len(text))
+    normalized = normalize_pipeline_input(
+        raw_text=text,
+        platform=settings.platform,
+        quality_mode=settings.quality_mode,
+        ideas_count=settings.ideas_count,
+        scripts_count=settings.scripts_count,
+        telegram_user_id=user_id,
+        telegram_username=message.from_user.username,
+        first_name=message.from_user.first_name,
+        last_name=message.from_user.last_name,
+        language_code=message.from_user.language_code,
+        telegram_chat_id=message.chat.id,
+        telegram_message_id=message.message_id,
+    )
+    logger.info(
+        "[bot] incoming normalized  user=%s  raw_len=%d  normalized_len=%d  too_short=%s",
+        user_id,
+        len(text),
+        len(normalized.normalized_text),
+        normalized.diagnostics.get("is_too_short"),
+    )
+
+    if len(normalized.normalized_text) < MIN_DESCRIPTION_CHARS:
+        logger.debug("[bot] description too short  user=%s  len=%d", user_id, len(normalized.normalized_text))
         await message.answer(
             "Мне нужно чуть больше контекста, чтобы не генерировать пустые идеи.\n\n"
             "Напишите хотя бы: ниша, продукт, аудитория и цель продвижения.",
@@ -637,8 +702,9 @@ async def accept_company_description(message: Message) -> None:
         )
         return
 
-    LAST_DESCRIPTION[user_id] = text
-    logger.info("[bot] description accepted  user=%s  len=%d", user_id, len(text))
+    LAST_DESCRIPTION[user_id] = normalized.normalized_text
+    CLARIFIED_DESCRIPTION.pop(user_id, None)
+    logger.info("[bot] description accepted  user=%s  len=%d", user_id, len(normalized.normalized_text))
     await message.answer(
         accepted_description_text(settings),
         reply_markup=start_project_keyboard(),
@@ -651,7 +717,21 @@ async def _create_pipeline_run_from_callback(
     settings: BotUserSettings,
 ) -> str:
     user = callback.from_user
-    title = _project_title(description)
+    normalized = normalize_pipeline_input(
+        raw_text=description,
+        platform=settings.platform,
+        quality_mode=settings.quality_mode,
+        ideas_count=settings.ideas_count,
+        scripts_count=settings.scripts_count,
+        telegram_user_id=user.id,
+        telegram_username=user.username,
+        first_name=user.first_name,
+        last_name=user.last_name,
+        language_code=user.language_code,
+        telegram_chat_id=callback.message.chat.id,
+        telegram_message_id=callback.message.message_id,
+    )
+    title = _project_title(normalized.normalized_text)
     async with async_session_factory() as session:
         db_user = await UserRepository(session).upsert_telegram_user(
             telegram_user_id=user.id,
@@ -667,15 +747,18 @@ async def _create_pipeline_run_from_callback(
         )
         project_input = await ProjectInputRepository(session).create_input(
             project_id=project.id,
-            raw_text=description,
-            platform=settings.platform,
-            ideas_count=settings.ideas_count,
-            scripts_count=settings.scripts_count,
+            raw_text=normalized.normalized_text,
+            platform=normalized.platform,
+            content_goal=normalized.content_goal,
+            ideas_count=normalized.ideas_count,
+            scripts_count=normalized.scripts_count,
             metadata={
                 "telegram_chat_id": callback.message.chat.id,
                 "telegram_user_id": user.id,
+                "telegram_username": user.username,
                 "quality_mode": settings.quality_mode,
                 "source": "telegram_bot",
+                "normalized_input": normalized.model_dump(),
             },
         )
         run = await PipelineRunRepository(session).create_run(

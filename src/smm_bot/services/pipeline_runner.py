@@ -15,7 +15,7 @@ from sqlalchemy import select
 from smm_bot.agents.llm import OpenRouterLLMClient, TrackingLLMClient
 from smm_bot.agents.pipeline import PipelineExecutor
 from smm_bot.agents.registry import MVP_GRAPH, AgentName, registry_for_quality_mode
-from smm_bot.agents.schemas import CompanyInput, FinalContentPack
+from smm_bot.agents.schemas import FinalContentPack
 from smm_bot.core.config import get_settings
 from smm_bot.db.models import (
     AgentRun,
@@ -25,6 +25,8 @@ from smm_bot.db.models import (
     ProjectInput,
 )
 from smm_bot.db.session import async_session_factory
+from smm_bot.services.event_trace import PipelineEventLogger
+from smm_bot.services.input_normalizer import normalize_pipeline_input
 
 
 logger = logging.getLogger(__name__)
@@ -32,9 +34,7 @@ logger = logging.getLogger(__name__)
 TOTAL_AGENTS = len(MVP_GRAPH)
 
 QUALITY_MODE_TITLES = {
-    "economy": "Экономный",
-    "balanced": "Баланс",
-    "high_quality": "Высокое качество",
+    "balanced": "Единый",
 }
 
 AGENT_PROGRESS: dict[str, dict[str, str]] = {
@@ -57,6 +57,11 @@ AGENT_PROGRESS: dict[str, dict[str, str]] = {
         "emoji": "💊",
         "label": "Ищу боли и триггеры",
         "quip": "Копаю в психологию. Это не больно, обещаю.",
+    },
+    "context_auditor": {
+        "emoji": "🧭",
+        "label": "Проверяю контекст",
+        "quip": "Сверяю, не уехал ли смысл проекта в сторону.",
     },
     "positioning": {
         "emoji": "🎯",
@@ -108,15 +113,40 @@ AGENT_PROGRESS: dict[str, dict[str, str]] = {
         "label": "Улучшаю идеи",
         "quip": "Чиню почти хорошие — чтобы стали реально хорошими.",
     },
+    "reference_video_researcher": {
+        "emoji": "🔎",
+        "label": "Подбираю видео-паттерны",
+        "quip": "Ищу рабочую форму для похожих сегментов.",
+    },
+    "topic_angle_generator": {
+        "emoji": "🧩",
+        "label": "Выбираю углы подачи",
+        "quip": "Ищу, под каким углом идея будет цеплять.",
+    },
+    "hook_generator": {
+        "emoji": "🎣",
+        "label": "Генерирую хуки",
+        "quip": "Первые секунды решают многое.",
+    },
     "script_writer": {
         "emoji": "✍️",
         "label": "Пишу сценарии",
         "quip": "Создаю реальный контент. Скоро...",
     },
+    "retention_optimizer": {
+        "emoji": "📈",
+        "label": "Проверяю удержание",
+        "quip": "Смотрю, где зритель может пролистнуть дальше.",
+    },
     "script_critic": {
         "emoji": "🎬",
         "label": "Редактирую сценарии",
         "quip": "Шлифую финальный вариант...",
+    },
+    "blind_script_checker": {
+        "emoji": "🕵️",
+        "label": "Проверяю смысл сценариев",
+        "quip": "Читаю сценарии вслепую и сверяю с бизнесом.",
     },
     "final_content_pack": {
         "emoji": "📦",
@@ -141,15 +171,27 @@ def _edit_telegram_message_sync(
     chat_id: int,
     message_id: int,
     text: str,
-) -> None:
+    keyboard: list | None = None,
+    *,
+    attempts: int = 1,
+) -> bool:
     url = f"https://api.telegram.org/bot{bot_token}/editMessageText"
-    payload = json.dumps({"chat_id": chat_id, "message_id": message_id, "text": text}).encode()
+    payload_data: dict[str, Any] = {"chat_id": chat_id, "message_id": message_id, "text": text}
+    if keyboard is not None:
+        payload_data["reply_markup"] = {"inline_keyboard": keyboard}
+    payload = json.dumps(payload_data).encode()
     req = urllib.request.Request(url, data=payload, headers={"Content-Type": "application/json"})
-    try:
-        with urllib.request.urlopen(req, timeout=5) as resp:
-            resp.read()
-    except Exception as exc:
-        logger.debug("[telegram] message edit skipped: %s", exc)
+    for attempt in range(1, attempts + 1):
+        try:
+            with urllib.request.urlopen(req, timeout=10) as resp:
+                resp.read()
+            return True
+        except Exception as exc:
+            if attempt >= attempts:
+                logger.debug("[telegram] message edit skipped: %s", exc)
+                return False
+            time.sleep(1)
+    return False
 
 
 def _make_progress_callback(
@@ -159,7 +201,6 @@ def _make_progress_callback(
     quality_mode: str,
     start_time: datetime,
 ) -> Callable[[str], None]:
-    mode_title = QUALITY_MODE_TITLES.get(quality_mode, quality_mode)
     step_counter = [0]
 
     def on_agent_start(agent_name: AgentName) -> None:
@@ -169,7 +210,6 @@ def _make_progress_callback(
         bar = _progress_bar(step - 1, TOTAL_AGENTS)
         text = (
             f"⚙️ Генерирую контент-пак\n\n"
-            f"Режим: {mode_title}\n\n"
             f"[{bar}] {step}/{TOTAL_AGENTS}\n\n"
             f"{info['emoji']} {info['label']}\n"
             f"   {info['quip']}\n\n"
@@ -268,7 +308,14 @@ def _nav_keyboard_json(run_id: str, page: int, total: int) -> list:
     return [nav, [{"text": "⬅️ Меню", "callback_data": "menu:home"}]]
 
 
-def _send_with_keyboard_sync(bot_token: str, chat_id: int, text: str, keyboard: list) -> None:
+def _send_with_keyboard_sync(
+    bot_token: str,
+    chat_id: int,
+    text: str,
+    keyboard: list,
+    *,
+    attempts: int = 1,
+) -> bool:
     url = f"https://api.telegram.org/bot{bot_token}/sendMessage"
     payload = json.dumps({
         "chat_id": chat_id,
@@ -276,11 +323,17 @@ def _send_with_keyboard_sync(bot_token: str, chat_id: int, text: str, keyboard: 
         "reply_markup": {"inline_keyboard": keyboard},
     }).encode()
     req = urllib.request.Request(url, data=payload, headers={"Content-Type": "application/json"})
-    try:
-        with urllib.request.urlopen(req, timeout=10) as resp:
-            resp.read()
-    except Exception as exc:
-        logger.warning("[telegram] send with keyboard failed: %s", exc)
+    for attempt in range(1, attempts + 1):
+        try:
+            with urllib.request.urlopen(req, timeout=10) as resp:
+                resp.read()
+            return True
+        except Exception as exc:
+            if attempt >= attempts:
+                logger.warning("[telegram] send with keyboard failed: %s", exc)
+                return False
+            time.sleep(1)
+    return False
 
 
 async def execute_pipeline_run(
@@ -305,6 +358,25 @@ async def execute_pipeline_run(
         if project_input is None:
             raise RuntimeError(f"Project input for pipeline run {run_uuid} not found")
 
+        input_metadata = dict(project_input.metadata_ or {})
+        normalized_input = normalize_pipeline_input(
+            raw_text=project_input.raw_text,
+            platform=project_input.platform,
+            content_goal=project_input.content_goal,
+            quality_mode=run.quality_mode,
+            ideas_count=project_input.ideas_count,
+            scripts_count=project_input.scripts_count,
+            source=input_metadata.get("source", "telegram_bot"),
+            telegram_user_id=input_metadata.get("telegram_user_id"),
+            telegram_username=input_metadata.get("telegram_username"),
+            telegram_chat_id=input_metadata.get("telegram_chat_id"),
+            telegram_message_id=input_metadata.get("telegram_message_id"),
+        )
+        trace_logger = PipelineEventLogger(run_id=run_uuid, trace_dir=settings.pipeline_trace_dir)
+        input_metadata["normalized_input"] = normalized_input.model_dump()
+        input_metadata["trace_file"] = str(trace_logger.path)
+        project_input.metadata_ = input_metadata
+
         run.status = "running"
         run.started_at = datetime.now(UTC)
         run.current_agent = "brief"
@@ -317,6 +389,14 @@ async def execute_pipeline_run(
         run.quality_mode,
         project_input.platform,
         len(project_input.raw_text),
+    )
+    logger.info("[pipeline] trace file run=%s path=%s", run_uuid, trace_logger.path)
+    trace_logger.record(
+        "pipeline_run_loaded",
+        quality_mode=run.quality_mode,
+        project_input_id=str(project_input.id),
+        project_id=str(project_input.project_id),
+        normalized_input=normalized_input,
     )
 
     start_time = datetime.now(UTC)
@@ -345,15 +425,18 @@ async def execute_pipeline_run(
             llm_client,
             registry=registry,
             on_agent_start=progress_callback,
+            on_agent_event=lambda event: _record_trace_event(trace_logger, event),
         ).run(
-            CompanyInput(
-                company_description=project_input.raw_text,
-                platform=project_input.platform or "Instagram Reels",
-                ideas_count=project_input.ideas_count,
-                scripts_count=project_input.scripts_count,
-            )
+            normalized_input.to_company_input()
         )
         pack = result.final_content_pack.final_content_pack
+        trace_logger.record(
+            "pipeline_result",
+            outputs=result.outputs,
+            final_content_pack=pack,
+            approved_count=len(pack.approved_content),
+            rejected_count=len(pack.rejected_content),
+        )
 
         async with async_session_factory() as session:
             run = await session.get(PipelineRun, run_uuid)
@@ -376,34 +459,58 @@ async def execute_pipeline_run(
             len(pack.rejected_content),
             elapsed,
         )
+        trace_logger.record(
+            "pipeline_completed",
+            elapsed_seconds=elapsed,
+            approved_count=len(pack.approved_content),
+            rejected_count=len(pack.rejected_content),
+        )
 
         if telegram_chat_id is not None and settings.telegram_bot_token:
             approved_list = [item.model_dump() for item in pack.approved_content]
             total = len(approved_list)
 
-            # Edit progress message with compact summary
-            summary = (
-                f"✅ Готово! {total} сценари{'й' if total == 1 else 'я' if 2 <= total <= 4 else 'ев'} готово.\n\n"
-                f"Run ID: {run_uuid}\n"
-                f"Листайте стрелками ▶️"
-                if total > 0
-                else (
-                    f"⚠️ Генерация завершена, но идеи не прошли фильтрацию.\n\nRun ID: {run_uuid}"
-                )
-            )
-            if telegram_message_id is not None:
-                _edit_telegram_message_sync(
-                    settings.telegram_bot_token, telegram_chat_id, telegram_message_id, summary
-                )
-
             if total > 0:
                 first_page = format_content_page(approved_list[0], 0, total)
                 keyboard = _nav_keyboard_json(str(run_uuid), 0, total)
-                _send_with_keyboard_sync(
-                    settings.telegram_bot_token, telegram_chat_id, first_page, keyboard
+                delivered = False
+                if telegram_message_id is not None:
+                    delivered = _edit_telegram_message_sync(
+                        settings.telegram_bot_token,
+                        telegram_chat_id,
+                        telegram_message_id,
+                        first_page,
+                        keyboard,
+                        attempts=3,
+                    )
+                if not delivered:
+                    delivered = _send_with_keyboard_sync(
+                        settings.telegram_bot_token,
+                        telegram_chat_id,
+                        first_page,
+                        keyboard,
+                        attempts=3,
+                    )
+                if not delivered:
+                    logger.error("[telegram] final content delivery failed  run=%s", run_uuid)
+                    trace_logger.record("telegram_delivery_failed", approved_count=total)
+            else:
+                summary = (
+                    "⚠️ Генерация завершена, но финальные сценарии не сформировались.\n\n"
+                    f"Run ID: {run_uuid}\n"
+                    "Попробуйте запустить снова с более подробными вводными или проверьте статус запуска."
                 )
-            elif telegram_message_id is None:
-                await _send_telegram_message(telegram_chat_id, summary)
+                delivered = False
+                if telegram_message_id is not None:
+                    delivered = _edit_telegram_message_sync(
+                        settings.telegram_bot_token,
+                        telegram_chat_id,
+                        telegram_message_id,
+                        summary,
+                        attempts=3,
+                    )
+                if not delivered:
+                    await _send_telegram_message(telegram_chat_id, summary)
 
     except Exception as exc:
         elapsed = time.monotonic() - t_start
@@ -413,6 +520,12 @@ async def execute_pipeline_run(
             type(exc).__name__,
             exc,
             elapsed,
+        )
+        trace_logger.record(
+            "pipeline_failed",
+            elapsed_seconds=elapsed,
+            error_type=type(exc).__name__,
+            error_message=str(exc),
         )
 
         async with async_session_factory() as session:
@@ -459,17 +572,24 @@ async def get_run_status_text(pipeline_run_id: str) -> str:
             FinalContentPackRow.pipeline_run_id == run_uuid
         )
         final_pack = await session.scalar(statement)
+        project_input = None
+        if run.project_input_id is not None:
+            project_input = await session.get(ProjectInput, run.project_input_id)
 
         text = (
             "Статус запуска\n\n"
             f"Run ID: {run.id}\n"
             f"Статус: {run.status}\n"
-            f"Режим: {run.quality_mode}\n"
+            "Режим: единый\n"
         )
         if run.current_agent:
             text += f"Текущий агент: {run.current_agent}\n"
         if run.error_message:
             text += f"\nОшибка: {run.error_message}\n"
+        if project_input is not None:
+            trace_file = (project_input.metadata_ or {}).get("trace_file")
+            if trace_file:
+                text += f"Trace file: {trace_file}\n"
         if final_pack is not None:
             approved = final_pack.approved_content[:5]
             lines = [
@@ -478,6 +598,12 @@ async def get_run_status_text(pipeline_run_id: str) -> str:
             ]
             text += "\nСохраненные идеи:\n" + ("\n".join(lines) or "- Список пуст")
         return text
+
+
+def _record_trace_event(trace_logger: PipelineEventLogger, event: dict[str, Any]) -> None:
+    event = dict(event)
+    event_type = event.pop("event_type", "agent_event")
+    trace_logger.record(event_type, **event)
 
 
 async def _save_agent_runs(

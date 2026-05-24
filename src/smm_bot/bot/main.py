@@ -26,7 +26,7 @@ async def run_bot() -> None:
         [
             BotCommand(command="start", description="Открыть главное меню"),
             BotCommand(command="menu", description="Кнопки запуска и настроек"),
-            BotCommand(command="settings", description="Настроить режим качества"),
+            BotCommand(command="settings", description="Посмотреть настройки генерации"),
             BotCommand(command="help", description="Что нужно для запуска"),
         ]
     )
